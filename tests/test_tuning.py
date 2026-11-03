@@ -8,6 +8,7 @@ from traffic_prediction.tuning import (
     chronological_cv_splits,
     evaluate_masked_mae,
     tune_random_forest,
+    tune_randomized_search,
     tune_xgboost,
 )
 
@@ -116,3 +117,33 @@ def test_tune_xgboost_synthetic():
         assert "best_params" in res
         assert "best_mae" in res
         assert res["best_mae"] < 15.0
+
+
+def test_tune_randomized_search_rf():
+    np.random.seed(42)
+    X = np.random.randn(60, 4).astype(np.float32)
+    y = (X[:, 0] * 3.0 + 40.0 + np.random.randn(60) * 0.2).astype(np.float32)
+
+    dists = {
+        "n_estimators": [5, 10],
+        "max_depth": [3, 4],
+    }
+    result = tune_randomized_search(
+        X, y, model_type="random_forest", param_distributions=dists, n_iter=2, n_splits=2
+    )
+    assert "best_params" in result
+    assert "best_mae" in result
+    assert result["best_mae"] < 10.0
+    assert len(result["results"]) <= 2
+
+
+def test_tune_randomized_search_invalid():
+    X = np.random.randn(50, 4).astype(np.float32)
+    y = np.random.randn(50).astype(np.float32)
+
+    with pytest.raises(ValueError, match="model_type"):
+        tune_randomized_search(X, y, model_type="invalid_model")
+
+    with pytest.raises(ValueError, match="n_iter"):
+        tune_randomized_search(X, y, n_iter=0)
+

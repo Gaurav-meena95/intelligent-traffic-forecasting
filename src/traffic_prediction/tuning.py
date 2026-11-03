@@ -211,3 +211,124 @@ def tune_xgboost(
         "best_mae": best_score,
         "results": results,
     }
+
+
+def tune_randomized_search(
+    X: np.ndarray,
+    y: np.ndarray,
+    model_type: str = "random_forest",
+    param_distributions: dict[str, Any] | None = None,
+    n_iter: int = 5,
+    n_splits: int = 3,
+    min_train_fraction: float = 0.5,
+    n_jobs: int = -1,
+    random_state: int = 42,
+) -> dict[str, Any]:
+    """Perform randomized forward-chaining hyperparameter search.
+
+    Samples parameter configurations across continuous/discrete distributions
+    while enforcing strict chronological cross-validation.
+    """
+    X_arr = np.asarray(X, dtype=np.float32)
+    y_arr = np.asarray(y, dtype=np.float32)
+    if X_arr.ndim != 2:
+        raise ValueError("X must be a 2D array of features.")
+    if len(X_arr) != len(y_arr):
+        raise ValueError("X and y must have the same number of rows.")
+    if n_iter < 1:
+        raise ValueError("n_iter must be at least 1.")
+
+    model_type_clean = model_type.strip().lower()
+    if model_type_clean not in ("random_forest", "xgboost"):
+        raise ValueError("model_type must be either 'random_forest' or 'xgboost'.")
+
+    rng = np.random.default_rng(random_state)
+
+    if model_type_clean == "random_forest":
+        default_dists: dict[str, list[Any]] = {
+            "n_estimators": [10, 25, 50],
+            "max_depth": [4, 6, 8, 12],
+            "min_samples_leaf": [2, 4, 8],
+        }
+    else:
+        if not HAS_XGBOOST or XGBRegressor is None:
+            raise ImportError(
+                "xgboost is not installed or its native C++ runtime could not be loaded."
+            )
+        default_dists = {
+            "n_estimators": [25, 50, 100],
+            "max_depth": [3, 5, 7],
+            "learning_rate": [0.03, 0.05, 0.1, 0.15],
+            "subsample": [0.7, 0.85, 1.0],
+        }
+
+    dists = param_distributions if param_distributions is not None else default_dists
+    if not dists or any(len(v) == 0 for v in dists.values()):
+        raise ValueError("param_distributions must be non-empty.")
+
+    # Sample n_iter unique combinations
+    candidates: list[dict[str, Any]] = []
+    keys = list(dists.keys())
+    seen: set[tuple[Any, ...]] = set()
+    max_attempts = n_iter * 20
+    attempts = 0
+
+    while len(candidates) < n_iter and attempts < max_attempts:
+        attempts += 1
+        sampled = {k: rng.choice(dists[k]) for k in keys}
+        # Cast standard numpy scalars to python types
+        for k, v in sampled.items():
+            if hasattr(v, "item"):
+                sampled[k] = v.item()
+        signature = tuple(sampled[k] for k in keys)
+        if signature not in seen:
+            seen.add(signature)
+            candidates.append(sampled)
+
+    if not candidates:
+        candidates = [{k: dists[k][0] for k in keys}]
+
+    splits = list(
+        chronological_cv_splits(
+            len(X_arr), n_splits=n_splits, min_train_fraction=min_train_fraction
+        )
+    )
+
+    best_score = float("inf")
+    best_params = candidates[0]
+    results = []
+
+    for params in candidates:
+        fold_scores = []
+        for train_idx, val_idx in splits:
+            if model_type_clean == "random_forest":
+                model: Any = RandomForestRegressor(
+                    n_jobs=n_jobs,
+                    random_state=random_state,
+                    **params,
+                )
+            else:
+                model = XGBRegressor(
+                    n_jobs=1 if n_jobs < 0 else n_jobs,
+                    random_state=random_state,
+                    **params,
+                )
+            model.fit(X_arr[train_idx], y_arr[train_idx])
+            preds = model.predict(X_arr[val_idx])
+            score = evaluate_masked_mae(y_arr[val_idx], preds)
+            fold_scores.append(score)
+
+        mean_score = float(np.mean(fold_scores))
+        results.append(
+            {"params": params, "mean_mae": mean_score, "folds": fold_scores}
+        )
+        if mean_score < best_score:
+            best_score = mean_score
+            best_params = params
+
+    return {
+        "best_params": best_params,
+        "best_mae": best_score,
+        "results": results,
+    }
+
