@@ -4,7 +4,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from traffic_prediction.graph import build_distance_adjacency
+from traffic_prediction.graph import (
+    build_directed_distance_adjacency,
+    build_distance_adjacency,
+    compute_dual_diffusion_matrices,
+)
 
 
 def test_build_distance_adjacency_structure():
@@ -60,3 +64,39 @@ def test_build_distance_adjacency_invalid_inputs():
     neg_dist = pd.DataFrame({"from": ["s1"], "to": ["s2"], "cost": [-5.0]})
     with pytest.raises(ValueError, match="finite non-negative"):
         build_distance_adjacency(neg_dist, ["s1", "s2"])
+
+
+def test_build_directed_distance_adjacency():
+    sensor_ids = ["s1", "s2", "s3"]
+    # Only s1 -> s2, no s2 -> s1
+    distances = pd.DataFrame(
+        {
+            "from": ["s1", "s2"],
+            "to": ["s2", "s3"],
+            "cost": [100.0, 200.0],
+        }
+    )
+    adj = build_directed_distance_adjacency(distances, sensor_ids, threshold=0.01)
+    assert adj.shape == (3, 3)
+    np.testing.assert_allclose(np.diag(adj), 1.0)
+    # Directed: s1 -> s2 should be positive, s2 -> s1 should be 0.0
+    assert adj[0, 1] > 0.0
+    assert adj[1, 0] == 0.0
+
+
+def test_compute_dual_diffusion_matrices():
+    adj = np.array(
+        [
+            [1.0, 0.8, 0.0],
+            [0.0, 1.0, 0.5],
+            [0.2, 0.0, 1.0],
+        ],
+        dtype=np.float32,
+    )
+    P_f, P_b = compute_dual_diffusion_matrices(adj)
+    assert P_f.shape == (3, 3)
+    assert P_b.shape == (3, 3)
+    # Row sums of forward transition must be approx 1.0
+    np.testing.assert_allclose(P_f.sum(axis=1), np.ones(3), rtol=1e-5)
+    np.testing.assert_allclose(P_b.sum(axis=1), np.ones(3), rtol=1e-5)
+
