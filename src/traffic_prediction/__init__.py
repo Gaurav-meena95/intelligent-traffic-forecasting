@@ -18,12 +18,18 @@ from traffic_prediction.features import (
     make_spatial_lag_features,
     time_features,
 )
-from traffic_prediction.graph import build_distance_adjacency
+from traffic_prediction.graph import (
+    build_directed_distance_adjacency,
+    build_distance_adjacency,
+    compute_dual_diffusion_matrices,
+)
+from traffic_prediction.hybrid import ResidualSpatialGAT, ResidualSpatialHybrid
 from traffic_prediction.metrics import peak_mask, regression_metrics
 from traffic_prediction.tuning import (
     chronological_cv_splits,
     evaluate_masked_mae,
     tune_random_forest,
+    tune_randomized_search,
     tune_xgboost,
 )
 
@@ -37,9 +43,13 @@ __all__ = [
     "HORIZON_STEPS",
     "GraphAttentionLayer",
     "GraphAttentionNetwork",
+    "ResidualSpatialGAT",
+    "ResidualSpatialHybrid",
     "TimeSplit",
+    "build_directed_distance_adjacency",
     "build_distance_adjacency",
     "chronological_cv_splits",
+    "compute_dual_diffusion_matrices",
     "evaluate_masked_mae",
     "load_speed_csv",
     "make_enhanced_sensor_features",
@@ -54,6 +64,7 @@ __all__ = [
     "time_features",
     "time_split",
     "tune_random_forest",
+    "tune_randomized_search",
     "tune_xgboost",
 ]
 
